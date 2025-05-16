@@ -1,6 +1,9 @@
 
 This repo is used for creating summaries for candidates, and identifying whether or not they fall into specific categories based of certain words in their responses. To run the code in this repo you first must download python and vscode. Once everything is set up you can run these steps:
 
+Watch Videos:
+- set_up MUST always be done before any other steps, all others can be done in any order, or individually
+
 1. To set up the environment and install all necessary packages run <poetry shell> then <poetry install>
 
 2. Add the Leads file to the base of the repo. If you name it <Anonymized Leads.xlsx> no changes will need to be made to hte script, if it is named something else, you will have to update some parts of the script
