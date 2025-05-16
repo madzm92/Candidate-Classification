@@ -68,13 +68,13 @@ def process_row(row):
         "SocialTermsFound": ", ".join(social_found),
     }
 
-def process_nlp_responses(input_file_name: str):
+def process_nlp_responses(file_name: str):
     """This script reads in the Anonymized Leads file
     searches for key words,and returns a dataframe with 
     the new boolean columns, and key words found for each category"""
 
     # Load and process
-    df = pd.read_excel(input_file_name)
+    df = pd.read_excel(file_name)
     df = df.drop(columns=['Name', 'Email', 'Data sharing consent'])
     results = df.apply(process_row, axis=1, result_type="expand")
     df_out = pd.concat([df, results], axis=1)

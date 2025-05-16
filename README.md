@@ -1,13 +1,40 @@
 
 This repo is used for creating summaries for candidates, and identifying whether or not they fall into specific categories based of certain words in their responses. To run the code in this repo you first must download python and vscode. Once everything is set up you can run these steps:
 
-1. To set up the environment and install all necessicary mpackages run <poetry shell> then <poetry install>
+1. To set up the environment and install all necessary packages run <poetry shell> then <poetry install>
+
 2. Add the Leads file to the base of the repo. If you name it <Anonymized Leads.xlsx> no changes will need to be made to hte script, if it is named something else, you will have to update some parts of the script
-3. Add the OPEN_API_KEY to the __init__.py file like <OPEN_API_KEY="key value">
-4. To run the NLP portion of the script, and return just the results for columns 3-6, in your terminal run <python src/candidate_classification_project/nlp_script.py>
+
+3. Add the OPEN_API_KEY: run this command in the terminal: everything not including < >
+
+<export OPEN_API_KEY=>
+
+
+4. To run the NLP portion of the script, and return just the results for columns 3-6, in your terminal run 
+
+<python src/candidate_classification_project/nlp_script.py --file_name "Anonymized Leads.xlsx">
+
 This returns a file with the Candidates name, and 8 additional columns for the 4 categories (Management, EA_Adjacent, XSensitive, SocialConcern), and 4 coulmns flagging which values were found
-5. To run the llm portion of the script, and return columns 1-2 (Summary, Career Goals), in your terminal run <python src/candidate_classification_project/openai_script.py>
-6. To run both scripts, adn return a file with all output columns, in your terminal run <python src/candidate_classification_project/run_both.py>
+
+4.b To edit the categories, update the values listed in rows 48-51 in nlp_script.py
+
+5. To run the llm portion of the script, and return columns 1-2 (Summary, Career Goals), in your terminal run 
+
+<python src/candidate_classification_project/openai_script.py --file_name "Anonymized Leads.xlsx" --row_start 0 --row_end 5>
+
+5.b To update the prompt, edit lines 17-24 in openai_script.py
+
+5.c To run the script on the entire file run: 
+
+<python src/candidate_classification_project/openai_script.py --file_name "Anonymized Leads.xlsx">
+
+5.d To run the script on a different sub-set, adjust the --row_start 0 --row_end 10 values, example of running on 100 rows
+
+<python src/candidate_classification_project/openai_script.py --file_name "Anonymized Leads.xlsx" --row_start 0 --row_end 100>
+
+6. To run both scripts, adn return a file with all output columns, in your terminal run 
+
+<python src/candidate_classification_project/run_both.py --file_name "Anonymized Leads.xlsx" --row_start 0 --row_end 5>
 
 - To update the summary and career goals prompt, go to the openai_script.py file, and see notes there
 - To update the nlp key word search, go to the nlp_script.py and see notes there
