@@ -10,13 +10,12 @@ nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('punkt_tab')
-
-stop_words = set(stopwords.words('english'))
 lemmatizer = WordNetLemmatizer()
+stop_words = set(stopwords.words("english"))
 
-# Define keyword sets
+# Keyword sets
 EA_KEYWORDS = {"80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"}
-X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk", "ai alignment"}
+X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk"}
 SOCIAL_TERMS = {"justice", "equity", "inequality", "marginalized", "oppression", "social concern"}
 MGMT_TERMS = {"manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"}
 
@@ -28,10 +27,11 @@ def preprocess(text):
     tokens = [lemmatizer.lemmatize(t) for t in tokens if t.isalnum() and t not in stop_words]
     return " ".join(tokens)
 
-# Check if any keywords are present in text
-def contains_keywords(text, keywords):
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in keywords)
+# Return list of keywords found in text
+def find_keywords(text, keywords, preprocess_text=False):
+    text_to_check = preprocess(text) if preprocess_text else text.lower()
+    found = [kw for kw in keywords if kw in text_to_check]
+    return found
 
 # Naive summarizer: return first 1–2 sentences
 def summarize(text, n=2):
@@ -44,23 +44,46 @@ def summarize(text, n=2):
 def process_row(row):
     profile_text = " ".join(str(row[col]) for col in row.index if pd.notna(row[col]))
     clean_text = preprocess(profile_text)
-    
+
+    # Check and collect found keywords
+    mgmt_found = find_keywords(clean_text, MGMT_TERMS, preprocess_text=False)
+    ea_found = find_keywords(profile_text, EA_KEYWORDS)
+    xs_found = find_keywords(profile_text, X_SENSITIVE)
+    social_found = find_keywords(profile_text, SOCIAL_TERMS)
+
     return {
-        "Summary": summarize(profile_text, n=2),
-        "Career_Goals": summarize(str(row.get("Path to Impact", "")), n=1),
-        "Management": contains_keywords(clean_text, MGMT_TERMS),
-        "EA_Adjacent": contains_keywords(profile_text, EA_KEYWORDS),
-        "XSensitive": contains_keywords(profile_text, X_SENSITIVE),
-        "SocialConcern": contains_keywords(profile_text, SOCIAL_TERMS),
+        "Management": bool(mgmt_found),
+        "MgmtTermsFound": ", ".join(mgmt_found),
+        "EA_Adjacent": bool(ea_found),
+        "EATermsFound": ", ".join(ea_found),
+        "XSensitive": bool(xs_found),
+        "XSensitiveTermsFound": ", ".join(xs_found),
+        "SocialConcern": bool(social_found),
+        "SocialTermsFound": ", ".join(social_found),
     }
 
-# Load data and process
-df = pd.read_excel("Anonymized Leads.xlsx")  # Or pd.read_excel("candidates.xlsx")
-df = df.drop(columns=['Name', 'Email', 'Data sharing consent'])
-results = df.apply(process_row, axis=1, result_type="expand")
-df_out = pd.concat([df, results], axis=1)
-df_out = df_out[['[*] Full name', 'Summary', 'Career_Goals', 'Management', 'EA_Adjacent', 'XSensitive', 'SocialConcern']]
+def process_nlp_responses(input_file_name: str):
+    """This script reads in the Anonymized Leads file
+    searches for key words,and returns a dataframe with 
+    the new boolean columns, and key words found for each category"""
 
-# Save the result
-df_out.to_csv("nlp_enriched_candidates.csv", index=False)
-print("✅ Done! Saved to nlp_enriched_candidates.csv")
+    # Load and process
+    df = pd.read_excel(input_file_name)
+    df = df.drop(columns=['Name', 'Email', 'Data sharing consent'])
+    results = df.apply(process_row, axis=1, result_type="expand")
+    df_out = pd.concat([df, results], axis=1)
+
+    # Drop original columns
+    df_out = df_out.drop(columns=['Career level', 'Profile URL', 'Other profile URL','Job title', 'Organisation', 'Profession', 'Profession (other)','Field of study', 'Field of study (other)', 'Path to impact','Experience', 'Skills', 'Impressive project', 'Course (single select)'])
+    
+    #renames full name column
+    df_out = df_out.rename(columns={'[*] Full name':'Full name'})
+
+    # exports file
+    df_out.to_excel('nlp_results.xlsx')
+    print("✅ Done! Saved to nlp_results.xlsx")
+    
+    return df_out
+
+if __name__ == "__main__":
+    process_nlp_responses("Anonymized Leads.xlsx")
