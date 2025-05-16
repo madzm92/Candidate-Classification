@@ -3,7 +3,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import WordNetLemmatizer
-import string
+import argparse
 
 # Download NLTK resources if needed
 nltk.download('punkt')
@@ -44,7 +44,7 @@ def process_row(row):
     profile_text = " ".join(str(row[col]) for col in row.index if pd.notna(row[col]))
     clean_text = preprocess(profile_text)
 
-    # Keyword sets: Updatwe these if needed
+    #TODO: Keyword sets: Updatwe these if needed
     EA_KEYWORDS = {"80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"}
     X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk"}
     SOCIAL_TERMS = {"justice", "equity", "inequality", "marginalized", "oppression", "social concern"}
@@ -92,4 +92,16 @@ def process_nlp_responses(input_file_name: str):
     return df_out
 
 if __name__ == "__main__":
-    process_nlp_responses("Anonymized Leads.xlsx")
+
+    parser = argparse.ArgumentParser(description="Run lead processing script with parameters.")
+    
+    parser.add_argument(
+        "--file_name", type=str, default="Anonymized Leads.xlsx",
+        help="Name of the Excel file to process"
+    )
+
+    args = parser.parse_args()
+
+    process_nlp_responses(
+        file_name=args.file_name,
+    )
