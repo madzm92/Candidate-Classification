@@ -1,0 +1,13 @@
+# Ignore macOS system files
+.DS_Store
+
+# Ignore data sources
+*.txt
+*.csv
+*.xlsx
+data_sources
+mbta_data
+*shapefiles
+*shp
+*__init__.py
+*.pyc
