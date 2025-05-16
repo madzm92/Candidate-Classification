@@ -30,6 +30,7 @@ def build_prompt(df: pd.DataFrame, row):
     takes in the dataframe, and a single row of the dataframe.
     Returns the prompt for the llm."""
 
+    # Update this propmt if you would like different return values. Make sure to keep Summary & Career_Goals as is
     fields = "\n".join([f"**{col}**: {row[col]}" for col in df.columns])
     return f"""
     Given the following candidate profile, return a JSON object with these keys:

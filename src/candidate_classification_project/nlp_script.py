@@ -10,40 +10,45 @@ nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('wordnet')
 nltk.download('punkt_tab')
-lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words("english"))
 
-# Keyword sets
-EA_KEYWORDS = {"80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"}
-X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk"}
-SOCIAL_TERMS = {"justice", "equity", "inequality", "marginalized", "oppression", "social concern"}
-MGMT_TERMS = {"manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"}
-
-# Preprocess text
 def preprocess(text):
+    """Preprocess text"""
+
+    lemmatizer = WordNetLemmatizer()
+    stop_words = set(stopwords.words("english"))
+
     if not isinstance(text, str):
         return ""
     tokens = word_tokenize(text.lower())
     tokens = [lemmatizer.lemmatize(t) for t in tokens if t.isalnum() and t not in stop_words]
     return " ".join(tokens)
 
-# Return list of keywords found in text
 def find_keywords(text, keywords, preprocess_text=False):
+    """Return list of keywords found in text"""
+
     text_to_check = preprocess(text) if preprocess_text else text.lower()
     found = [kw for kw in keywords if kw in text_to_check]
     return found
 
-# Naive summarizer: return first 1–2 sentences
 def summarize(text, n=2):
+    """Naive summarizer: return first 1–2 sentences"""
+
     if not isinstance(text, str):
         return ""
     sentences = sent_tokenize(text)
     return " ".join(sentences[:n])
 
-# Process each row of the DataFrame
 def process_row(row):
+    """Process each row of the DataFrame"""
+
     profile_text = " ".join(str(row[col]) for col in row.index if pd.notna(row[col]))
     clean_text = preprocess(profile_text)
+
+    # Keyword sets: Updatwe these if needed
+    EA_KEYWORDS = {"80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"}
+    X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk"}
+    SOCIAL_TERMS = {"justice", "equity", "inequality", "marginalized", "oppression", "social concern"}
+    MGMT_TERMS = {"manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"}
 
     # Check and collect found keywords
     mgmt_found = find_keywords(clean_text, MGMT_TERMS, preprocess_text=False)
@@ -51,6 +56,7 @@ def process_row(row):
     xs_found = find_keywords(profile_text, X_SENSITIVE)
     social_found = find_keywords(profile_text, SOCIAL_TERMS)
 
+    #To update the ouput column names, update values here
     return {
         "Management": bool(mgmt_found),
         "MgmtTermsFound": ", ".join(mgmt_found),
@@ -82,7 +88,7 @@ def process_nlp_responses(input_file_name: str):
     # exports file
     df_out.to_excel('nlp_results.xlsx')
     print("✅ Done! Saved to nlp_results.xlsx")
-    
+
     return df_out
 
 if __name__ == "__main__":
