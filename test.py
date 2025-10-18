@@ -4,7 +4,8 @@ import logging
 import pandas as pd
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QTextEdit,
-    QPushButton, QListWidget, QDialog, QListWidgetItem, QHBoxLayout
+    QPushButton, QListWidget, QDialog, QListWidgetItem,
+    QHBoxLayout, QLineEdit, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt
 from src.candidate_classification_project.nlp_script import process_nlp_responses
@@ -15,24 +16,19 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+# --- Dialog for selecting filter values after NLP ---
 class FilterDialog(QDialog):
-    """Dialog to select filter values for a column using multi-highlight selection"""
     def __init__(self, df, column_name):
         super().__init__()
         self.setWindowTitle(f"Filter: {column_name}")
         self.selected_values = []
-        self.df = df
-        self.column = column_name
 
         layout = QVBoxLayout()
-
-        # List of unique values in column
         self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)  # allow multi-highlight
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         unique_vals = sorted(df[column_name].dropna().unique())
         for val in unique_vals:
-            item = QListWidgetItem(str(val))
-            self.list_widget.addItem(item)
+            self.list_widget.addItem(QListWidgetItem(str(val)))
         layout.addWidget(self.list_widget)
 
         # Buttons
@@ -48,16 +44,166 @@ class FilterDialog(QDialog):
         self.setLayout(layout)
 
     def accept(self):
-        # Collect all highlighted/selected values
         self.selected_values = [item.text() for item in self.list_widget.selectedItems()]
         super().accept()
 
 
+# --- Dialog for choosing default or custom NLP categories ---
+class NLPConfigDialog(QDialog):
+    DEFAULT_CATEGORIES = {
+        "EA_KEYWORDS": ["80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"],
+        "X_SENSITIVE": ["ai x-risk", "agi safety", "existential risk"],
+        "SOCIAL_TERMS": ["justice", "equity", "inequality", "marginalized", "oppression", "social concern"],
+        "MGMT_TERMS": ["manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"]
+    }
 
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Configure NLP Categories")
+        self.resize(500, 500)
+        self.use_default = True
+        self.custom_categories = {}
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Choose NLP configuration:"))
+
+        # Option buttons
+        self.radio_default = QRadioButton("Use default NLP categories")
+        self.radio_custom = QRadioButton("Define new NLP categories")
+        self.radio_default.setChecked(True)
+
+        self.group = QButtonGroup()
+        self.group.addButton(self.radio_default)
+        self.group.addButton(self.radio_custom)
+        layout.addWidget(self.radio_default)
+        layout.addWidget(self.radio_custom)
+
+        # Show default categories
+        self.output_box = QTextEdit()
+        self.output_box.setReadOnly(True)
+        self.refresh_output()
+        layout.addWidget(QLabel("\nDefault NLP categories:"))
+        layout.addWidget(self.output_box)
+
+        # Add custom category button
+        self.add_cat_btn = QPushButton("Add Custom NLP Categories")
+        self.add_cat_btn.setEnabled(False)
+        self.add_cat_btn.clicked.connect(self.open_category_editor)
+        layout.addWidget(self.add_cat_btn)
+        self.radio_custom.toggled.connect(
+            lambda checked: self.add_cat_btn.setEnabled(checked)
+        )
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+
+    def refresh_output(self):
+        self.output_box.clear()
+        for cat, words in self.DEFAULT_CATEGORIES.items():
+            self.output_box.append(f"📂 {cat}: {', '.join(words)}")
+
+    def open_category_editor(self):
+        editor = CategoryEditorDialog(self.custom_categories)
+        if editor.exec() == QDialog.DialogCode.Accepted:
+            self.custom_categories = editor.categories
+            # Refresh output box to show new custom categories
+            self.output_box.clear()
+            for cat, words in self.custom_categories.items():
+                self.output_box.append(f"📂 {cat}: {', '.join(words)}")
+
+    def accept(self):
+        self.use_default = self.radio_default.isChecked()
+        if not self.use_default and self.custom_categories:
+            # Replace default categories with custom ones
+            self.DEFAULT_CATEGORIES = self.custom_categories
+        super().accept()
+
+
+
+
+
+# --- Dialog for defining custom NLP categories ---
+class CategoryEditorDialog(QDialog):
+    def __init__(self, existing_categories=None):
+        super().__init__()
+        self.setWindowTitle("Add Custom NLP Categories")
+        self.resize(500, 500)
+        self.categories = existing_categories if existing_categories else {}
+
+        self.layout = QVBoxLayout()
+        self.layout.addWidget(QLabel("Add category title:"))
+        self.cat_input = QLineEdit()
+        self.layout.addWidget(self.cat_input)
+
+        self.add_cat_btn = QPushButton("Add Category")
+        self.add_cat_btn.clicked.connect(self.add_category)
+        self.layout.addWidget(self.add_cat_btn)
+
+        self.layout.addWidget(QLabel("Add keywords (comma separated):"))
+        self.keyword_input = QLineEdit()
+        self.layout.addWidget(self.keyword_input)
+
+        self.add_kw_btn = QPushButton("Add Keywords")
+        self.add_kw_btn.clicked.connect(self.add_keywords)
+        self.layout.addWidget(self.add_kw_btn)
+
+        self.output_box = QTextEdit()
+        self.output_box.setReadOnly(True)
+        self.layout.addWidget(self.output_box)
+
+        # Navigation
+        btn_layout = QHBoxLayout()
+        back_btn = QPushButton("Back")
+        back_btn.clicked.connect(self.reject)
+        done_btn = QPushButton("Done")
+        done_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(back_btn)
+        btn_layout.addWidget(done_btn)
+        self.layout.addLayout(btn_layout)
+
+        self.setLayout(self.layout)
+        self.refresh_output()
+
+    def add_category(self):
+        cat = self.cat_input.text().strip()
+        if cat:
+            self.categories[cat] = []
+            self.cat_input.clear()
+            self.refresh_output()
+
+    def add_keywords(self):
+        text = self.keyword_input.text().strip()
+        if not text:
+            return
+        if not self.categories:
+            self.output_box.append("⚠️ Please add a category first.")
+            return
+        latest_cat = list(self.categories.keys())[-1]
+        words = [w.strip() for w in text.split(",") if w.strip()]
+        self.categories[latest_cat].extend(words)
+        self.keyword_input.clear()
+        self.refresh_output()
+
+    def refresh_output(self):
+        self.output_box.clear()
+        for cat, words in self.categories.items():
+            self.output_box.append(f"📂 {cat}: {', '.join(words)}")
+
+
+# --- Main App ---
 class NLPApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NLP Processor with Filters")
+        self.setWindowTitle("NLP Processor")
         self.setGeometry(200, 200, 800, 600)
 
         layout = QVBoxLayout()
@@ -70,25 +216,25 @@ class NLPApp(QWidget):
         self.output_box.setReadOnly(True)
         layout.addWidget(self.output_box)
 
-        # Pre-NLP filter
-        self.pre_filter_btn = QPushButton("Select Column to Filter (Pre-NLP)")
-        self.pre_filter_btn.setEnabled(False)
-        self.pre_filter_btn.clicked.connect(lambda: self.select_column_to_filter(pre_nlp=True))
-        layout.addWidget(self.pre_filter_btn)
+        # Configure NLP
+        self.config_btn = QPushButton("Configure NLP")
+        self.config_btn.setEnabled(False)
+        self.config_btn.clicked.connect(self.configure_nlp)
+        layout.addWidget(self.config_btn)
 
-        # Run NLP button
+        # Run NLP
         self.run_nlp_btn = QPushButton("Run NLP")
         self.run_nlp_btn.setEnabled(False)
         self.run_nlp_btn.clicked.connect(self.run_nlp)
         layout.addWidget(self.run_nlp_btn)
 
-        # Post-NLP filter
-        self.post_filter_btn = QPushButton("Select Column to Filter (Post-NLP)")
+        # Post-NLP filters
+        self.post_filter_btn = QPushButton("Filter Columns (Post-NLP)")
         self.post_filter_btn.setEnabled(False)
-        self.post_filter_btn.clicked.connect(lambda: self.select_column_to_filter(pre_nlp=False))
+        self.post_filter_btn.clicked.connect(self.select_column_to_filter)
         layout.addWidget(self.post_filter_btn)
 
-        # Export button
+        # Export
         self.export_btn = QPushButton("Export Final Data")
         self.export_btn.setEnabled(False)
         self.export_btn.clicked.connect(self.export_final)
@@ -97,15 +243,14 @@ class NLPApp(QWidget):
         self.setLayout(layout)
         self.setAcceptDrops(True)
 
-        # Data storage
+        # Data
         self.df_original = None
-        self.df_filtered_pre = None
         self.df_nlp = None
-        self.df_final = None
-        self.pre_filters = {}
-        self.post_filters = {}
+        self.selected_columns = []
+        self.custom_categories = {}
+        self.use_default = True
 
-    # Drag & drop
+    # --- Drag & Drop ---
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
@@ -121,27 +266,62 @@ class NLPApp(QWidget):
                 elif file_path.endswith((".xls", ".xlsx")):
                     df = pd.read_excel(file_path)
                 else:
-                    self.output_box.setText("Unsupported file type. Use CSV or Excel.")
+                    self.output_box.setText("Unsupported file type.")
                     return
                 self.df_original = df
-                self.df_filtered_pre = df.copy()
-                self.output_box.setText(f"Loaded {len(df)} rows with {len(df.columns)} columns.")
-                self.pre_filter_btn.setEnabled(True)
-                self.run_nlp_btn.setEnabled(True)
+                self.output_box.setText(f"✅ Loaded {len(df)} rows and {len(df.columns)} columns.")
+                self.config_btn.setEnabled(True)
             except Exception as e:
-                self.output_box.setText(f"Error reading file:\n{e}")
-                logging.error(f"Error reading file {file_path}: {e}")
+                self.output_box.setText(f"Error loading file:\n{e}")
+                logging.error(e)
 
-    # Column selection for filtering
-    def select_column_to_filter(self, pre_nlp=True):
-        df = self.df_filtered_pre if pre_nlp else self.df_nlp
+    # --- NLP Configuration ---
+    def configure_nlp(self):
+        dialog = NLPConfigDialog()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if dialog.use_default:
+                self.nlp_categories = dialog.DEFAULT_CATEGORIES
+            else:
+                self.nlp_categories = dialog.custom_categories
+
+            self.output_box.append("✅ NLP categories configured.")
+
+            # Enable Run NLP button now that categories are set
+            if self.df_original is not None and len(self.df_original) > 0:
+                self.run_nlp_btn.setEnabled(True)
+
+    # --- Run NLP ---
+    def run_nlp(self):
+        if self.df_original is None or len(self.df_original) == 0:
+            self.output_box.append("No data to process.")
+            return
+
+        self.output_box.append("Running NLP processing...")
+
+        # Save the original DataFrame to a temp file (all rows, no pre-NLP filtering)
+        temp_file = os.path.join(os.path.expanduser("~"), "Desktop", "temp_filtered.xlsx")
+        self.df_original.to_excel(temp_file, index=False)
+
+        # Run NLP on the full dataset
+        self.df_nlp = process_nlp_responses(
+            file_name=temp_file,
+            categories=self.nlp_categories
+        )
+
+        self.output_box.append(f"NLP processing done: {len(self.df_nlp)} rows")
+        self.post_filter_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)
+
+
+    # --- Post-NLP Filters ---
+    def select_column_to_filter(self):
+        df = self.df_nlp
         if df is None:
             return
         col_dialog = QDialog(self)
         col_dialog.setWindowTitle("Select Column to Filter")
         layout = QVBoxLayout()
         list_widget = QListWidget()
-        list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         for col in df.columns:
             list_widget.addItem(col)
         layout.addWidget(list_widget)
@@ -153,50 +333,26 @@ class NLPApp(QWidget):
             selected_items = list_widget.selectedItems()
             if selected_items:
                 column_name = selected_items[0].text()
-                self.filter_column_values(column_name, pre_nlp=pre_nlp)
+                self.filter_column_values(column_name)
 
-    # Filtering by selected values
-    def filter_column_values(self, column_name, pre_nlp=True):
-        df = self.df_filtered_pre if pre_nlp else self.df_nlp
+    def filter_column_values(self, column_name):
+        df = self.df_nlp
         dialog = FilterDialog(df, column_name)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_vals = dialog.selected_values
             if selected_vals:
                 mask = df[column_name].isin(selected_vals)
-                if pre_nlp:
-                    self.df_filtered_pre = df[mask]
-                    self.pre_filters[column_name] = selected_vals
-                    self.output_box.append(f"Pre-NLP filtered {column_name}: {len(self.df_filtered_pre)} rows left")
-                else:
-                    self.df_nlp = df[mask]
-                    self.post_filters[column_name] = selected_vals
-                    self.output_box.append(f"Post-NLP filtered {column_name}: {len(self.df_nlp)} rows left")
+                self.df_nlp = df[mask]
+                self.output_box.append(f"Filtered {column_name}: {len(self.df_nlp)} rows remain.")
 
-    # Run NLP processing
-    def run_nlp(self):
-        if self.df_filtered_pre is None or len(self.df_filtered_pre) == 0:
-            self.output_box.append("No data to process.")
-            return
-        temp_file = os.path.join(os.path.expanduser("~"), "Desktop", "temp_filtered.xlsx")
-        self.df_filtered_pre.to_excel(temp_file, index=False)
-        self.output_box.append("Running NLP processing...")
-        self.df_nlp = process_nlp_responses(temp_file)
-        self.output_box.append(f"NLP processing done: {len(self.df_nlp)} rows")
-        self.post_filter_btn.setEnabled(True)
-        self.export_btn.setEnabled(True)
-
-    # Export final filtered & NLP data
+    # --- Export ---
     def export_final(self):
         if self.df_nlp is None or len(self.df_nlp) == 0:
-            self.output_box.append("No data to export.")
+            self.output_box.append("⚠️ No data to export.")
             return
-        self.df_final = self.df_nlp
         output_file = os.path.join(os.path.expanduser("~"), "Desktop", "nlp_results.xlsx")
-        self.df_final.to_excel(output_file, index=False)
-        self.output_box.append(f"✅ Exported final data to {output_file}")
-
-        # Open automatically
-        import sys
+        self.df_nlp.to_excel(output_file, index=False)
+        self.output_box.append(f"✅ Exported to {output_file}")
         if sys.platform == "darwin":
             os.system(f"open '{output_file}'")
         elif sys.platform == "win32":
@@ -206,12 +362,7 @@ class NLPApp(QWidget):
 
 
 if __name__ == "__main__":
-    try:
-        app = QApplication(sys.argv)
-        window = NLPApp()
-        window.show()
-        sys.exit(app.exec())
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        input("Press Enter to exit...")
+    app = QApplication(sys.argv)
+    window = NLPApp()
+    window.show()
+    sys.exit(app.exec())
