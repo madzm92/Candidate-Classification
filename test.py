@@ -250,6 +250,14 @@ class NLPApp(QWidget):
         self.custom_categories = {}
         self.use_default = True
 
+        # Data storage
+        self.df_original = None
+        self.df_nlp = None
+        self.df_final = None
+
+        # Filters storage
+        self.post_filters = {}
+
     # --- Drag & Drop ---
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -335,15 +343,22 @@ class NLPApp(QWidget):
                 column_name = selected_items[0].text()
                 self.filter_column_values(column_name)
 
-    def filter_column_values(self, column_name):
-        df = self.df_nlp
+    def filter_column_values(self, column_name, pre_nlp=False):
+        df = self.df_nlp  # pre-NLP is no longer used
         dialog = FilterDialog(df, column_name)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             selected_vals = dialog.selected_values
+
+            # Convert "True"/"False" strings to boolean if column is boolean
+            if df[column_name].dtype == bool:
+                selected_vals = [val == "True" for val in selected_vals]
+
             if selected_vals:
                 mask = df[column_name].isin(selected_vals)
                 self.df_nlp = df[mask]
-                self.output_box.append(f"Filtered {column_name}: {len(self.df_nlp)} rows remain.")
+                self.post_filters[column_name] = selected_vals
+                self.output_box.append(f"Post-NLP filtered {column_name}: {len(self.df_nlp)} rows left")
+
 
     # --- Export ---
     def export_final(self):
