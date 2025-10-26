@@ -3,13 +3,14 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import WordNetLemmatizer
+import os
 import argparse
 
 # Download NLTK resources if needed
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
-nltk.download('punkt_tab')
+# nltk.download('punkt')
+# nltk.download('stopwords')
+# nltk.download('wordnet')
+# nltk.download('punkt_tab')
 
 def preprocess(text):
     """Preprocess text"""
@@ -38,56 +39,39 @@ def summarize(text, n=2):
     sentences = sent_tokenize(text)
     return " ".join(sentences[:n])
 
-def process_row(row):
-    """Process each row of the DataFrame"""
+def process_row(row, categories: dict):
+    """Process each row of the DataFrame using dynamic keyword categories"""
 
     profile_text = " ".join(str(row[col]) for col in row.index if pd.notna(row[col]))
     clean_text = preprocess(profile_text)
 
-    #TODO: Keyword sets: Updatwe these if needed
-    EA_KEYWORDS = {"80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"}
-    X_SENSITIVE = {"ai x-risk", "agi safety", "existential risk"}
-    SOCIAL_TERMS = {"justice", "equity", "inequality", "marginalized", "oppression", "social concern"}
-    MGMT_TERMS = {"manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"}
+    results = {}
+    for cat_name, keywords in categories.items():
+        found = find_keywords(clean_text, keywords, preprocess_text=False)
+        results[cat_name] = bool(found)
+        results[f"{cat_name}_TermsFound"] = ", ".join(found)
 
-    # Check and collect found keywords
-    mgmt_found = find_keywords(clean_text, MGMT_TERMS, preprocess_text=False)
-    ea_found = find_keywords(profile_text, EA_KEYWORDS)
-    xs_found = find_keywords(profile_text, X_SENSITIVE)
-    social_found = find_keywords(profile_text, SOCIAL_TERMS)
+    return results
 
-    #To update the ouput column names, update values here
-    return {
-        "Management": bool(mgmt_found),
-        "MgmtTermsFound": ", ".join(mgmt_found),
-        "EA_Adjacent": bool(ea_found),
-        "EATermsFound": ", ".join(ea_found),
-        "XSensitive": bool(xs_found),
-        "XSensitiveTermsFound": ", ".join(xs_found),
-        "SocialConcern": bool(social_found),
-        "SocialTermsFound": ", ".join(social_found),
-    }
-
-def process_nlp_responses(file_name: str):
-    """This script reads in the Anonymized Leads file
-    searches for key words,and returns a dataframe with 
-    the new boolean columns, and key words found for each category"""
-
-    # Load and process
+def process_nlp_responses(file_name: str, categories: dict):
     df = pd.read_excel(file_name)
     df = df.drop(columns=['Name', 'Email', 'Data sharing consent'])
-    results = df.apply(process_row, axis=1, result_type="expand")
+
+    # Run NLP
+    results = df.apply(lambda row: process_row(row, categories), axis=1, result_type="expand")
     df_out = pd.concat([df, results], axis=1)
 
-    # Drop original columns
-    df_out = df_out.drop(columns=['Career level', 'Profile URL', 'Other profile URL','Job title', 'Organisation', 'Profession', 'Profession (other)','Field of study', 'Field of study (other)', 'Path to impact','Experience', 'Skills', 'Impressive project', 'Course (single select)'])
-    
-    #renames full name column
-    df_out = df_out.rename(columns={'[*] Full name':'Full name'})
+    # Keep only full name + NLP output columns
+    nlp_columns = list(categories.keys())
+    terms_columns = [f"{cat}_TermsFound" for cat in categories.keys()]
+    columns_to_keep = ['[*] Full name'] + nlp_columns + terms_columns
 
-    # exports file
-    df_out.to_excel('nlp_results.xlsx')
-    print("✅ Done! Saved to nlp_results.xlsx")
+    df_out = df_out[[col for col in columns_to_keep if col in df_out.columns]]
+
+    # Export
+    output_file = os.path.join(os.path.expanduser("~"), "Desktop", "nlp_results.xlsx")
+    df_out.to_excel(output_file, index=False)
+    print(f"✅ Done! Saved to {output_file}")
 
     return df_out
 
