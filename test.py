@@ -51,10 +51,10 @@ class FilterDialog(QDialog):
 # --- Dialog for choosing default or custom NLP categories ---
 class NLPConfigDialog(QDialog):
     DEFAULT_CATEGORIES = {
-        "EA Keywords": ["80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"],
+        "EA Keyword": ["80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"],
         "X Sensitive": ["ai x-risk", "agi safety", "existential risk"],
-        "Social Terms": ["justice", "equity", "inequality", "marginalized", "oppression", "social concern"],
-        "Management Terms": ["manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"]
+        "Social": ["justice", "equity", "inequality", "marginalized", "oppression", "social concern"],
+        "Management": ["manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"]
     }
 
     def __init__(self):
@@ -306,20 +306,44 @@ class NLPApp(QWidget):
 
         self.output_box.append("Running NLP processing...")
 
-        # Save the original DataFrame to a temp file (all rows, no pre-NLP filtering)
+        # Save the original DataFrame to a temp file
         temp_file = os.path.join(os.path.expanduser("~"), "Desktop", "temp_filtered.xlsx")
         self.df_original.to_excel(temp_file, index=False)
 
         # Run NLP on the full dataset
-        self.df_nlp = process_nlp_responses(
+        df_nlp_output = process_nlp_responses(
             file_name=temp_file,
             categories=self.nlp_categories
         )
 
-        self.output_box.append(f"NLP processing done: {len(self.df_nlp)} rows")
+        # --- ✅ Merge NLP results with original data ---
+        if isinstance(df_nlp_output, pd.DataFrame):
+            # Try to align by index or a shared key if available
+            if len(df_nlp_output) == len(self.df_original):
+                self.df_nlp = pd.concat([self.df_original.reset_index(drop=True),
+                                        df_nlp_output.reset_index(drop=True)], axis=1)
+            else:
+                # If lengths differ, try a left join by a shared ID column (customize if needed)
+                common_cols = list(set(self.df_original.columns) & set(df_nlp_output.columns))
+                if common_cols:
+                    self.df_nlp = pd.merge(self.df_original, df_nlp_output, on=common_cols, how="left")
+                else:
+                    # Fallback to concatenation with best effort
+                    self.df_nlp = pd.concat([self.df_original.reset_index(drop=True),
+                                            df_nlp_output.reset_index(drop=True)], axis=1)
+            if '[*] Full name' in self.df_nlp.columns and 'Full name' not in self.df_nlp.columns:
+                self.df_nlp = self.df_nlp.rename(columns={'[*] Full name': 'Full name'})
+            if '[>] Country' in self.df_nlp.columns and 'Country' not in self.df_nlp.columns:
+                self.df_nlp = self.df_nlp.rename(columns={'[>] Country': 'Country'})
+            if '[>] City' in self.df_nlp.columns and 'City' not in self.df_nlp.columns:
+                self.df_nlp = self.df_nlp.rename(columns={'[>] City': 'City'})
+        else:
+            self.output_box.append("⚠️ NLP function did not return a valid DataFrame.")
+            return
+
+        self.output_box.append(f"NLP processing done: {len(self.df_nlp)} rows, {len(self.df_nlp.columns)} columns")
         self.post_filter_btn.setEnabled(True)
         self.export_btn.setEnabled(True)
-
 
     # --- Post-NLP Filters ---
     def select_column_to_filter(self):

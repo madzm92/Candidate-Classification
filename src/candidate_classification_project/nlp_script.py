@@ -49,7 +49,7 @@ def process_row(row, categories: dict):
     for cat_name, keywords in categories.items():
         found = find_keywords(clean_text, keywords, preprocess_text=False)
         results[cat_name] = bool(found)
-        results[f"{cat_name}_TermsFound"] = ", ".join(found)
+        results[f"{cat_name} Terms Found"] = ", ".join(found)
 
     return results
 
@@ -63,7 +63,7 @@ def process_nlp_responses(file_name: str, categories: dict):
 
     # Keep only full name + NLP output columns
     nlp_columns = list(categories.keys())
-    terms_columns = [f"{cat}_TermsFound" for cat in categories.keys()]
+    terms_columns = [f"{cat} Terms Found" for cat in categories.keys()]
     columns_to_keep = ['[*] Full name'] + nlp_columns + terms_columns
 
     df_out = df_out[[col for col in columns_to_keep if col in df_out.columns]]
