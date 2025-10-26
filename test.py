@@ -51,10 +51,10 @@ class FilterDialog(QDialog):
 # --- Dialog for choosing default or custom NLP categories ---
 class NLPConfigDialog(QDialog):
     DEFAULT_CATEGORIES = {
-        "EA_KEYWORDS": ["80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"],
-        "X_SENSITIVE": ["ai x-risk", "agi safety", "existential risk"],
-        "SOCIAL_TERMS": ["justice", "equity", "inequality", "marginalized", "oppression", "social concern"],
-        "MGMT_TERMS": ["manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"]
+        "EA Keywords": ["80,000 hours", "80k", "gwwc", "giving what we can", "10% pledge"],
+        "X Sensitive": ["ai x-risk", "agi safety", "existential risk"],
+        "Social Terms": ["justice", "equity", "inequality", "marginalized", "oppression", "social concern"],
+        "Management Terms": ["manage", "supervise", "lead", "led", "managed", "oversaw", "directed", "organized", "coordinated"]
     }
 
     def __init__(self):
