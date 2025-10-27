@@ -1,122 +1,163 @@
 import pandas as pd
-from openai import OpenAI
-from tqdm import tqdm
+from openai import AsyncOpenAI
+from tqdm.asyncio import tqdm_asyncio
 import json
-from candidate_classification_project import OPEN_API_KEY
 import argparse
 import os
+import time
+from datetime import datetime
+import asyncio
 
-def build_prompt(df: pd.DataFrame, row):
-    """Function to build the structured prompt from a candidate row
-    takes in the dataframe, and a single row of the dataframe.
-    Returns the prompt for the llm."""
-
-    # TODO: Update this propmt if you would like different return values. Make sure to keep Summary & Career_Goals as is
-    fields = "\n".join([f"**{col}**: {row[col]}" for col in df.columns])
+def build_batch_prompts(df, batch):
+    """Builds a single prompt string for a batch of candidate profiles."""
+    profiles = []
+    for _, row in batch.iterrows():
+        fields = "\n".join([f"**{col}**: {row[col]}" for col in df.columns])
+        profiles.append(fields)
+    combined_profiles = "\n\n---\n\n".join(profiles)
     return f"""
-    Given the following candidate profile, return a JSON object with these keys:
-    - "Summary": Please give me a short one-sentence summary of a job candidate's profile data, 
-    around 100 words or less. Focus on describing their professional track record, not complimenting them. 
-    Your summary should be firm and no-nonsense, and not try to sugarcoat things or inflate your evaluation of 
-    people just to be nice. Be fair but discerning. Focus on their educational and professional information. 
-    DO NOT focus on race, religion, color, national origin, gender, sexual orientation, or any other legally protected status. 
-    The summary should be accurate and not make up or guess facts.
-    - "Career_Goals": Based on the “Path to impact” field, summarize in less than 100 words what the person’s intended next career steps are.
+You are a data summarization model. For each candidate below, return a JSON list where each element corresponds to one candidate.
 
-    Candidate Info:
-    {fields}
+Each element should be an object with the following keys:
+- "Summary": A concise, factual, one-sentence summary (max ~100 words) describing their professional and educational background only. DO NOT focus on race, religion, color, national origin, gender, sexual orientation, or any other legally protected status. 
 
-    Return valid JSON only.
+- "Career_Goals": A short (≤100 words) summary of their intended next career steps based on the “Path to impact” field.
+
+Do not guess or add information that isn't present. Be neutral and factual.
+Return only valid JSON — a list of objects, one per candidate.
+
+Candidate Profiles:
+{combined_profiles}
     """
 
-def get_chatgpt_response(client, prompt):
-    """Calls the llm with the desired prompt and retirms a dictionary with the column names and response values.
-    If the llm call does not work, a dictionary is still return but the values are None."""
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3
-        )
-        content = response.choices[0].message.content
-        return json.loads(content)
-    except Exception as e:
-        print(f"Error: {e}")
-        return {
-            "Summary": None,
-            "Career_Goals": None,
-        }
+async def get_chatgpt_batch_response(client, prompt, batch_idx, semaphore):
+    """Send a batch prompt to GPT-5 asynchronously and return JSON + token info."""
+    async with semaphore:
+        try:
+            start_time = time.time()
+            response = await client.chat.completions.create(
+                model="gpt-5",
+                messages=[
+                    {"role": "system", "content": "You are a precise JSON generator for candidate summaries."},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            end_time = time.time()
+            duration = end_time - start_time
 
-def process_llm_responses(file_name: str, api_key: str, row_start: int = None, row_end: int = None):
-    """This script reads in the cadidate leads file, and retuns a dataframe with 3 columns: the candidates name, a summary of the candidates experience 
-    and their career goals. The responses are generated using openais llm.
-    file_name: name of file"""
+            content = response.choices[0].message.content.strip()
+            usage = response.usage
 
-    # Load your OpenAI API key from environment variable or hardcode for testing
-    client = OpenAI(api_key=api_key)  # or client = OpenAI(api_key="your-key")
+            # Try parsing JSON directly
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                print(f"⚠️ JSON parse failed — batch {batch_idx} attempting cleanup")
+                content_clean = content[content.find("[") : content.rfind("]") + 1]
+                data = json.loads(content_clean)
 
-    # Load candidate data from CSV (adjust path/format as needed)
+            token_info = {
+                "input_tokens": usage.prompt_tokens if usage else None,
+                "output_tokens": usage.completion_tokens if usage else None,
+                "total_tokens": usage.total_tokens if usage else None,
+                "duration_sec": round(duration, 2),
+            }
+
+            return batch_idx, data, token_info
+
+        except Exception as e:
+            print(f"❌ Error in batch {batch_idx}: {e}")
+            return batch_idx, [], {"error": str(e)}
+
+
+async def process_llm_responses(file_name: str, api_key: str, batch_size: int = 10,
+                                row_start: int = None, row_end: int = None, concurrency: int = 3):
+    """Processes candidates in batches using GPT-5 asynchronously and saves incremental output."""
+    client = AsyncOpenAI(api_key=api_key)
     df = pd.read_excel(file_name)
-    df = df.drop(columns=['Name', 'Email', 'Data sharing consent'])
+    df = df.drop(columns=['Name', 'Email', 'Data sharing consent'], errors="ignore")
 
-    if not row_start:
-        df = df.iloc[0:row_end]
-    elif not row_end:
-        df = df.iloc[row_start:]
-    elif row_start and row_end:
+    if row_start or row_end:
         df = df.iloc[row_start:row_end]
 
-    # Process all rows
-    results = []
-    for _, row in tqdm(df.iterrows(), total=len(df)):
-        prompt = build_prompt(df, row)
-        parsed = get_chatgpt_response(client, prompt)
-        results.append(parsed)
+    output_file = "llm_results.xlsx"
+    token_log_file = "token_log.csv"
 
-    # Combine original data with extracted results
-    df_out = pd.concat([df, pd.DataFrame(results)], axis=1)
+    # Prepare log file if not exists
+    if not os.path.exists(token_log_file):
+        pd.DataFrame(columns=["timestamp", "batch_start", "batch_end",
+                              "input_tokens", "output_tokens", "total_tokens",
+                              "duration_sec"]).to_csv(token_log_file, index=False)
 
-    # Drop original columns
-    df_out = df_out.drop(columns=['Career level', 'Profile URL', 'Other profile URL','Job title', 'Organisation', 'Profession', 'Profession (other)','Field of study', 'Field of study (other)', 'Path to impact','Experience', 'Skills', 'Impressive project', 'Course (single select)'])
+    # Load existing results if partial file exists
+    existing = pd.read_excel(output_file) if os.path.exists(output_file) else pd.DataFrame()
 
-    #renames full name column
-    df_out = df_out.rename(columns={'[*] Full name':'Full name'})
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = []
 
-    # Save the final output
-    df_out.to_excel("llm_results.xlsx", index=False)
-    print("✅ Done! Saved to llm_results.xlsx")
+    print(f"🚀 Starting parallel batch processing | batch_size={batch_size} | concurrency={concurrency}")
 
-    return df_out
+    batches = [df.iloc[i:i + batch_size] for i in range(0, len(df), batch_size)]
 
-if __name__ == "__main__":
+    for batch_idx, batch in enumerate(batches):
+        prompt = build_batch_prompts(df, batch)
+        tasks.append(get_chatgpt_batch_response(client, prompt, batch_idx, semaphore))
 
-    parser = argparse.ArgumentParser(description="Run lead processing script with parameters.")
-    
-    parser.add_argument(
-        "--file_name", type=str, default="Anonymized Leads.xlsx",
-        help="Name of the Excel file to process"
-    )
-    parser.add_argument(
-        "--api_key", type=str, default=os.getenv("OPEN_API_KEY"),
-        help="API key for authentication (default reads from OPEN_API_KEY env variable)"
-    )
-    parser.add_argument(
-        "--row_start", type=int, default=None,
-        help="Start row (inclusive)"
-    )
-    parser.add_argument(
-        "--row_end", type=int, default=None,
-        help="End row (exclusive)"
-    )
+    start_time = time.time()
+    results = await tqdm_asyncio.gather(*tasks)
+    total_duration = round(time.time() - start_time, 2)
+
+    for batch_idx, responses, token_info in results:
+        batch = batches[batch_idx]
+
+        if isinstance(responses, list):
+            batch_out = pd.DataFrame(responses)
+        else:
+            batch_out = pd.DataFrame([responses])
+
+        batch_out.reset_index(drop=True, inplace=True)
+        batch.reset_index(drop=True, inplace=True)
+
+        df_out = pd.concat([batch, batch_out], axis=1)
+        existing = pd.concat([existing, df_out], ignore_index=True)
+        existing.to_excel(output_file, index=False)
+
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "batch_start": batch_idx * batch_size,
+            "batch_end": batch_idx * batch_size + len(batch),
+            **token_info
+        }
+        pd.DataFrame([log_entry]).to_csv(token_log_file, mode='a', header=False, index=False)
+
+        print(f"✅ Batch {batch_idx} done | Tokens: {token_info.get('total_tokens')} | Time: {token_info.get('duration_sec')}s")
+
+    print(f"🏁 All batches processed successfully in {total_duration}s!")
+    print(f"Results saved to: {output_file}")
+    print(f"Token usage log saved to: {token_log_file}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run GPT-5 batch summarization.")
+    parser.add_argument("--file_name", type=str, default="test_crm.xlsx", help="Excel file to process")
+    parser.add_argument("--api_key", type=str, default=os.getenv("OPEN_API_KEY"), help="OpenAI API key")
+    parser.add_argument("--batch_size", type=int, default=10, help="Batch size (default=5)")
+    parser.add_argument("--row_start", type=int, default=None)
+    parser.add_argument("--row_end", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=3, help="Number of parallel requests (default=3)")
 
     args = parser.parse_args()
 
-    process_llm_responses(
+    asyncio.run(process_llm_responses(
         file_name=args.file_name,
         api_key=args.api_key,
+        batch_size=args.batch_size,
         row_start=args.row_start,
-        row_end=args.row_end
-    )
+        row_end=args.row_end,
+        concurrency=args.concurrency
+    ))
+
+
+if __name__ == "__main__":
+    main()
