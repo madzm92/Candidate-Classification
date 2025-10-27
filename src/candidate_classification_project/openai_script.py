@@ -7,6 +7,7 @@ import os
 import time
 from datetime import datetime
 import asyncio
+import anthropic
 
 def build_batch_prompts(df, batch):
     """Builds a single prompt string for a batch of candidate profiles."""
@@ -30,12 +31,60 @@ Candidate Profiles:
 {combined_profiles}
     """
 
+def get_claude_batch_response_sync(client, prompt, batch_idx):
+    """
+    Synchronous call to Claude API for a batch.
+    """
+    try:
+        claude_prompt = f"\n\nHuman: {prompt}\n\nAssistant:"
+        start_time = time.time()
+        response = client.completions.create(
+            model="claude-4.1",
+            prompt=claude_prompt,
+            max_tokens_to_sample=2000,
+        )
+        end_time = time.time()
+        duration = end_time - start_time
+
+        content = response.completion.strip()
+
+        # Try parsing JSON
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            print(f"⚠️ JSON parse failed — batch {batch_idx}, attempting cleanup")
+            content_clean = content[content.find("["): content.rfind("]") + 1]
+            data = json.loads(content_clean)
+
+        token_info = {
+            "input_tokens": getattr(response, "prompt_tokens", None),
+            "output_tokens": getattr(response, "completion_tokens", None),
+            "total_tokens": getattr(response, "total_tokens", None),
+            "duration_sec": round(duration, 2),
+        }
+        breakpoint()
+        return batch_idx, data, token_info
+
+    except Exception as e:
+        print(f"❌ Error in batch {batch_idx}: {e}")
+        return batch_idx, [], {"error": str(e)}
+
+
+async def get_claude_batch_response(client, prompt, batch_idx, semaphore):
+    """
+    Async wrapper that runs Claude's synchronous API in a thread for parallelization.
+    """
+    async with semaphore:
+        return await asyncio.to_thread(get_claude_batch_response_sync, client, prompt, batch_idx)
+
+
 
 async def get_chatgpt_batch_response(client, prompt, batch_idx, semaphore):
     """Send a batch prompt to GPT-5 asynchronously and return JSON + token info."""
     async with semaphore:
         try:
             start_time = time.time()
+
             response = await client.chat.completions.create(
                 model="gpt-5",
                 messages=[
@@ -63,7 +112,7 @@ async def get_chatgpt_batch_response(client, prompt, batch_idx, semaphore):
                 "total_tokens": usage.total_tokens if usage else None,
                 "duration_sec": round(duration, 2),
             }
-
+            
             return batch_idx, data, token_info
 
         except Exception as e:
@@ -75,6 +124,7 @@ async def process_llm_responses(file_name: str, api_key: str, batch_size: int = 
                                 row_start: int = None, row_end: int = None, concurrency: int = 3):
     """Processes candidates in batches using GPT-5 asynchronously and saves incremental output."""
     client = AsyncOpenAI(api_key=api_key)
+    # client = anthropic.Client(api_key=os.getenv("CLAUDE_API_KEY"))
     df = pd.read_excel(file_name)
     df = df.drop(columns=['Name', 'Email', 'Data sharing consent'], errors="ignore")
 
@@ -103,6 +153,7 @@ async def process_llm_responses(file_name: str, api_key: str, batch_size: int = 
     for batch_idx, batch in enumerate(batches):
         prompt = build_batch_prompts(df, batch)
         tasks.append(get_chatgpt_batch_response(client, prompt, batch_idx, semaphore))
+        # tasks.append(get_claude_batch_response(client, prompt, batch_idx, semaphore))
 
     start_time = time.time()
     results = await tqdm_asyncio.gather(*tasks)
